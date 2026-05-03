@@ -116,10 +116,12 @@ if files:
 
 ## Caveats / known assumptions
 
-1. **`write_file` HTTP shape** — uses Pterodactyl convention `POST /files/write?file=PATH` with raw body. The OpenAPI spec implies `{"file": path}` in JSON body instead; if writes 4xx, flip the body shape.
-2. **`list_servers` pagination** — assumes the standard `GET /api/client` endpoint with `meta.pagination`. If that route 404s, the panel may have renamed or removed it.
-3. **No WebSocket console** — `send_command` is one-shot. Live log streaming requires the websocket endpoint (`/api/client/servers/{uuid}/websocket`), not yet wrapped.
-4. **Not covered yet:** schedules, allocations, dedicated-node management, subusers, SSH keys, 2FA, databases. The spec has them; just not wrapped.
+1. **No WebSocket console** — `send_command` is one-shot. Live log streaming requires the websocket endpoint (`/api/client/servers/{uuid}/websocket`), not yet wrapped.
+2. **Not covered yet:** schedules, allocations, dedicated-node management, subusers, SSH keys, 2FA, databases. The spec has them; just not wrapped.
+
+## Verified against the live API
+
+Smoke-tested end-to-end on `https://control.sparkedhost.us` — auth, `list_servers` (pagination), `server()`, `resources`, `list_files`, and the full `write_file` → `read_file` → `delete_files` round-trip all return as expected. Run `python smoke_test.py` after setting `SPARKEDHOST_API_KEY` (and optionally `SPARKEDHOST_TEST_WRITES=1`) to re-verify in your environment.
 
 ## Where it lives
 
