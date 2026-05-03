@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Python client for the SparkedHost (Apollo Panel) API"
 requires-python = ">=3.8"
 dependencies = ["requests>=2.25"]
+license = { text = "MIT" }
+readme = "README.md"
 
 [tool.setuptools.packages.find]
 include = ["sparkedhost*"]
