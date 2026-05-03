@@ -373,4 +373,52 @@ A passing run confirms auth, pagination, server lookup, resources, file listing,
 
 ## 12. Versioning
 
-`__version__` is exported from the package (`from sparkedhost import __version__`). The repo currently ships `0.1.0`. Bumping conventions are not enforced — when in doubt, semver.
+`__version__` is exported from the package (`from sparkedhost import __version__`). The repo currently ships `0.1.1`. Bumping conventions are not enforced — when in doubt, semver.
+
+## 13. CLI
+
+Installing the package also drops a `sparkedhost` command on `$PATH`. Every command reads `SPARKEDHOST_API_KEY` from the environment. Add `--json` to commands that support it for machine-parseable output.
+
+```
+sparkedhost --help
+sparkedhost --version
+
+sparkedhost account
+sparkedhost servers                       # uuid + name table
+sparkedhost servers --with-state          # also fetch each server's current_state (slower)
+sparkedhost servers --json                # raw JSON of every server's attributes
+
+sparkedhost power <uuid> {start|stop|restart|kill}
+sparkedhost cmd <uuid> "say hello"        # send a console command (server must be running)
+sparkedhost resources <uuid>              # state + memory + cpu + disk + uptime
+sparkedhost resources <uuid> --json
+
+sparkedhost ls <uuid>                     # list /
+sparkedhost ls <uuid> /logs               # list /logs
+sparkedhost cat <uuid> server.properties  # write file contents to stdout
+echo "motd=hello" | sparkedhost write <uuid> server.properties
+sparkedhost write <uuid> config.yml --from-file ./local-config.yml
+sparkedhost rm <uuid> bad.log old.log --root /logs
+sparkedhost mv <uuid> old.txt new.txt
+sparkedhost mkdir <uuid> backups
+sparkedhost upload <uuid> /tmp/world.zip /
+
+sparkedhost backup <uuid> "pre-update"
+sparkedhost backups <uuid>                # uuid, status (done/pending), size, name
+```
+
+**Pipe / redirect patterns:**
+```bash
+# back up a config file to local disk
+sparkedhost cat <uuid> server.properties > server.properties.bak
+
+# round-trip edit
+sparkedhost cat <uuid> server.properties \
+  | sed 's/^motd=.*/motd=Hello world/' \
+  | sparkedhost write <uuid> server.properties
+
+# get just the running server UUIDs
+sparkedhost servers --json | jq -r '.[] | select(.is_suspended | not) | .uuid'
+```
+
+Exit codes: `0` on success, `1` on `SparkedHostError` (with the message on stderr), `130` on `Ctrl-C`.

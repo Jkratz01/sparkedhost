@@ -59,6 +59,23 @@ server.create_backup(name="pre-update")
 
 See [`example.py`](example.py) for every operation, and [`CLAUDE.md`](CLAUDE.md) for the full API reference.
 
+## CLI
+
+Installing also drops a `sparkedhost` command on your `PATH`:
+
+```bash
+sparkedhost servers                              # list servers
+sparkedhost power <uuid> restart                 # power action
+sparkedhost cmd <uuid> "say hello"               # console command
+sparkedhost ls <uuid> /logs                      # list a directory
+sparkedhost cat <uuid> server.properties         # read a file
+echo "motd=hi" | sparkedhost write <uuid> server.properties
+sparkedhost rm <uuid> bad.log --root /logs
+sparkedhost backup <uuid> "pre-update"
+```
+
+`sparkedhost --help` lists every subcommand. Commands that fetch data accept `--json` for raw output (pipeable to `jq`).
+
 ## Using with Claude Code
 
 This repo ships a [`CLAUDE.md`](CLAUDE.md) so Claude sessions in *this* repo are auto-fluent. To get the same in a *consuming* project, add to that project's `CLAUDE.md`:
