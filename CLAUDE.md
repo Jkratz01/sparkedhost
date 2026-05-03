@@ -1,130 +1,373 @@
-# sparkedhost
+# sparkedhost — full reference
 
-Tiny Python client for the SparkedHost (Apollo Panel) API. Wraps the Pterodactyl-style `/api/client/*` endpoints at `https://control.sparkedhost.us`.
+A Python client for the **SparkedHost** game-hosting panel ("Apollo Panel"), which is a Pterodactyl fork. Wraps the Bearer-authenticated `/api/client/*` endpoints at `https://control.sparkedhost.us`.
 
-## Install
+> If you're an LLM helping a user use this library, you can answer every "how do I..." question from this file. Do not guess endpoints — every operation supported is listed here. Anything not listed is **not yet wrapped**; see "Out of scope" at the bottom.
+
+Repo: https://github.com/Jkratz01/sparkedhost · Source: [sparkedhost/client.py](sparkedhost/client.py) · Examples: [example.py](example.py)
+
+---
+
+## 1. Install
 
 ```bash
+# from a project venv
 pip install git+https://github.com/Jkratz01/sparkedhost.git
-# pin to a tag once cut: ...@v0.1.0
+
+# pin to a release once tagged
+pip install git+https://github.com/Jkratz01/sparkedhost.git@v0.1.0
 ```
 
-## Environment
+Runtime dep: `requests>=2.25`. Python 3.8+.
 
-| Var | Purpose | Required |
-| --- | --- | --- |
-| `SPARKEDHOST_API_KEY` | Bearer token (Apollo → API Credentials) | yes |
-| `SPARKEDHOST_BASE_URL` | Override the panel URL | no, defaults to `https://control.sparkedhost.us` |
+## 2. Environment
 
-```bash
-export SPARKEDHOST_API_KEY=...
-```
+| Var | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `SPARKEDHOST_API_KEY` | yes | — | Bearer token. Get it from Apollo → **Account Settings → API Credentials** (a `ptlc_…` string ~48 chars). |
+| `SPARKEDHOST_BASE_URL` | no | `https://control.sparkedhost.us` | Override only if SparkedHost migrates panels. |
 
-Or pass directly: `Client(api_key="...")`.
+Programmatic override: `Client(api_key="...", base_url="...", timeout=30)`. Direct args win over env vars.
 
-## Quick start
+**Never commit the key.** The repo's `.gitignore` excludes `.env`.
+
+## 3. 60-second quickstart
 
 ```python
 from sparkedhost import Client
 
-client = Client()  # reads SPARKEDHOST_API_KEY
+client = Client()                                     # uses SPARKEDHOST_API_KEY
 
-for s in client.list_servers():
-    print(s.identifier, s.uuid, s.name)
+for s in client.list_servers():                       # paginates automatically
+    print(s.identifier, s.name, "→", s.uuid)
 
 server = client.server("fd90ffb0-108d-4e24-996a-dc9678174d76")
 server.restart()
+server.send_command("say hello")
+text = server.read_file("server.properties")
+server.write_file("server.properties", text + "\n# touched\n")
 ```
 
-## API surface
+## 4. Authentication contract
 
-### `Client`
-- `Client(api_key=None, base_url=None, timeout=30)`
-- `client.list_servers()` → list[Server], paginates fully
-- `client.server(uuid)` → Server (fetches details)
-- `client.account()` → dict
+Every request sends `Authorization: Bearer <key>` and `Accept: application/json`. The client maps HTTP status to exceptions:
 
-### `Server` — power
-- `.start() / .stop() / .restart() / .kill()`
-- `.power(signal)` where `signal ∈ {"start","stop","restart","kill"}`
-
-### `Server` — status / commands
-- `.resources()` → current CPU/RAM/disk/network
-- `.send_command(command_string)` — write to console (server must be running)
-
-### `Server` — files
-| Method | Purpose |
-| --- | --- |
-| `list_files(directory="/")` | Directory listing |
-| `read_file(path)` → str | Raw text contents |
-| `write_file(path, content)` | Overwrite (str or bytes) |
-| `replace_in_file(path, old, new, count=-1, must_exist=True)` | Read → `str.replace` → write |
-| `delete_files(files, root="/")` | `files` is str or list |
-| `rename_files([(from, to), ...], root="/")` | Bulk rename / move |
-| `copy_file(location)` | Server-side copy |
-| `create_folder(name, root="/")` | mkdir |
-| `compress_files(files, root="/")` | Make archive |
-| `decompress_file(file, root="/")` | Extract archive |
-| `download_url(path)` → str | One-time signed download URL |
-| `upload_url()` → str | One-time signed upload URL |
-| `upload_file(local_path, remote_dir="/")` | Upload from local disk |
-
-### `Server` — backups
-- `.list_backups()`
-- `.create_backup(name=None)`
-
-### Server attributes
-After `client.server(uuid)` or `client.list_servers()`, each `Server` has `.uuid`, `.identifier`, `.name`, `.node`, and the full panel response in `.attributes`.
-
-## Errors
+| Status | Raises | Notes |
+| --- | --- | --- |
+| 2xx | — | Returns parsed JSON, raw text (when `raw=True`), or `None` on 204. |
+| 401 | `AuthenticationError` | Invalid/expired key. |
+| 403 | `AuthenticationError` | Key valid but lacks permission for that resource. |
+| 404 | `NotFoundError` | Wrong UUID, wrong path, deleted resource. |
+| other 4xx/5xx | `APIError` | Inspect `.status_code` and `.body` (raw response text). |
 
 ```python
 from sparkedhost import APIError, AuthenticationError, NotFoundError, SparkedHostError
+# SparkedHostError is the base class — catch it to catch all of the above.
 ```
-- `AuthenticationError` — 401 / 403
-- `NotFoundError` — 404
-- `APIError` — other 4xx / 5xx; `.status_code` and `.body` available
 
-## Common recipes
+## 5. Class reference
 
-**Restart every server:**
+### 5.1 `Client(api_key=None, base_url=None, timeout=30)`
+
+| Method | Signature | Returns | Endpoint |
+| --- | --- | --- | --- |
+| `account()` | `() -> dict` | Account envelope (see §6) | `GET /api/client/account` |
+| `list_servers()` | `() -> list[Server]` | All accessible servers; paginates fully | `GET /api/client?page=N` |
+| `server(uuid)` | `(str) -> Server` | Single server with `.attributes` populated | `GET /api/client/servers/{uuid}` |
+
+### 5.2 `Server`
+
+Constructed by the `Client`; never instantiate directly.
+
+**Properties (read-only, populated on construction):**
+
+| Attr | Type | Source |
+| --- | --- | --- |
+| `.uuid` | `str` | Constructor arg |
+| `.identifier` | `str` | `attributes.identifier` (8-char short id) |
+| `.name` | `str \| None` | `attributes.name` |
+| `.node` | `str \| None` | `attributes.node` |
+| `.attributes` | `dict` | Full server payload (see §6 for keys) |
+
+**Power — all return `None`:**
+
+| Method | Endpoint | Body |
+| --- | --- | --- |
+| `power(signal)` | `POST /servers/{uuid}/power` | `{"signal": signal}` where signal ∈ `{"start","stop","restart","kill"}` |
+| `start()` | same | shortcut for `power("start")` |
+| `stop()` | same | gracefully stop |
+| `restart()` | same | stop+start |
+| `kill()` | same | force-kill (use sparingly — risks data loss) |
+
+**Status / commands:**
+
+| Method | Returns | Endpoint |
+| --- | --- | --- |
+| `resources()` | `dict` (envelope, see §6.3) | `GET /servers/{uuid}/resources` |
+| `send_command(command: str)` | `None` | `POST /servers/{uuid}/command` body `{"command": ...}`. **Server must be running** or panel returns 502. |
+
+**Files** — all paths use `/` as the separator. `/` is the server's home directory (typically `/home/container`). Methods with `root=` treat names as **relative** to `root`; methods with `path=` use the full path from `/`.
+
+| Method | Returns | Endpoint |
+| --- | --- | --- |
+| `list_files(directory="/")` | `dict` (list envelope) | `GET /servers/{uuid}/files/list?directory=...` |
+| `read_file(path)` | `str` (raw contents) | `GET /servers/{uuid}/files/contents?file=...` |
+| `write_file(path, content: str \| bytes)` | `None` | `POST /servers/{uuid}/files/write?file=...`, body = raw content. Overwrites unconditionally. Strings are UTF-8 encoded. |
+| `replace_in_file(path, old, new, *, count=-1, must_exist=True)` | `str` (the new content) | Read → `str.replace` → write. Skips the write if no change. Raises `SparkedHostError` if `must_exist` and `old` not present. |
+| `delete_files(files, root="/")` | `None` | `POST /servers/{uuid}/files/delete` body `{"root": root, "files": [...]}`. `files` accepts a single string or an iterable. |
+| `rename_files(renames, root="/")` | `None` | `PUT /servers/{uuid}/files/rename` body `{"root": root, "files": [{"from": ..., "to": ...}, ...]}`. Accepts a single `(from, to)` tuple or a list. Doubles as **move** (when `to` contains a path). |
+| `copy_file(location)` | `None` | `POST /servers/{uuid}/files/copy` body `{"location": ...}`. Server-side copy; produces `<name> copy.<ext>` next to the original. |
+| `create_folder(name, root="/")` | `None` | `POST /servers/{uuid}/files/create-folder` body `{"root": root, "name": name}` |
+| `compress_files(files, root="/")` | `dict` (the new archive's file entry) | `POST /servers/{uuid}/files/compress` body `{"root": root, "files": [...]}`. Always produces a `.tar.gz`. |
+| `decompress_file(file, root="/")` | `None` | `POST /servers/{uuid}/files/decompress` body `{"root": root, "file": file}`. Supports `.zip`, `.tar.gz`, `.tar.xz`, etc. |
+| `download_url(path)` | `str` (one-time URL) | `GET /servers/{uuid}/files/download?file=...`. URL expires in seconds — fetch immediately. |
+| `upload_url()` | `str` (one-time URL) | `GET /servers/{uuid}/files/upload`. POST a multipart form with field `files` to that URL, optional `?directory=` query. |
+| `upload_file(local_path, remote_dir="/")` | `None` | Convenience wrapper: gets `upload_url()` and posts the local file. |
+
+**Backups:**
+
+| Method | Returns | Endpoint |
+| --- | --- | --- |
+| `list_backups()` | `dict` (list envelope of backups) | `GET /servers/{uuid}/backups` |
+| `create_backup(name=None)` | `dict` (the new backup's envelope) | `POST /servers/{uuid}/backups`, body `{"name": ...}` if provided. **Async on the panel side** — poll `list_backups()` and check `attributes.completed_at` to know when it's done. |
+
+## 6. Response envelopes
+
+All Apollo responses follow the Pterodactyl JSON:API style.
+
+### 6.1 Single resource
+
+```jsonc
+{
+  "object": "server",
+  "attributes": { /* the actual fields */ }
+}
+```
+
+In code: `data["attributes"]`.
+
+### 6.2 List
+
+```jsonc
+{
+  "object": "list",
+  "data": [
+    { "object": "server", "attributes": { ... } },
+    { "object": "server", "attributes": { ... } }
+  ],
+  "meta": {
+    "pagination": { "total": 14, "count": 14, "per_page": 50, "current_page": 1, "total_pages": 1 }
+  }
+}
+```
+
+`Client.list_servers()` walks all pages and returns `Server` objects directly — you don't need to parse pagination. Other list endpoints (`list_files`, `list_backups`) return the raw envelope so you'd do `[i["attributes"] for i in resp["data"]]`.
+
+### 6.3 Useful attribute keys (verified or standard for this panel family)
+
+**`account()` → `attributes`:** `id`, `admin` (bool), `username`, `email`, `first_name`, `last_name`, `language`.
+
+**Server (`Server.attributes` and items in `list_servers()` data):**
+`server_owner` (bool), `identifier` (8-char), `uuid`, `name`, `node`, `description`,
+`limits`: `{memory, swap, disk, io, cpu}` (MiB / weight / %),
+`feature_limits`: `{databases, allocations, backups}`,
+`is_suspended` (bool), `is_installing` (bool),
+`relationships.allocations.data[0].attributes`: `{ip, ip_alias, port, is_default}` — your connection address.
+
+**`resources()` → `attributes`:** `current_state` (`"running" | "starting" | "stopping" | "offline"`),
+`is_suspended` (bool),
+`resources`: `{memory_bytes, cpu_absolute, disk_bytes, network_rx_bytes, network_tx_bytes, uptime}` (uptime in ms).
+
+**`list_files()` → each `data[i].attributes`:** `name`, `mode` (`"-rwxr-xr-x"`), `mode_bits` (octal string), `size` (bytes), `is_file` (bool), `is_symlink` (bool), `mimetype`, `created_at`, `modified_at`.
+
+**Backup (`list_backups()` items / `create_backup()` return):** `uuid`, `name`, `ignored_files`, `sha256_hash` (null until done), `bytes` (0 until done), `created_at`, `completed_at` (null while running), `is_locked`, `is_successful`.
+
+## 7. Cookbook
+
+### Restart all running servers
 ```python
 for s in client.list_servers():
-    s.restart()
+    if s.attributes.get("is_suspended"):
+        continue
+    if s.resources()["attributes"]["current_state"] == "running":
+        s.restart()
 ```
 
-**Edit `server.properties` in place:**
+### Edit a config in place
 ```python
-s.replace_in_file("server.properties",
-                  old="motd=A Minecraft Server",
-                  new="motd=Hello world")
+server.replace_in_file(
+    "server.properties",
+    old="motd=A Minecraft Server",
+    new="motd=Welcome",
+)
 ```
 
-**Drop a config file straight from disk:**
+### Push a local file to the server
 ```python
-with open("local.yml") as f:
-    s.write_file("config.yml", f.read())
+with open("/tmp/config.yml", "rb") as f:
+    server.write_file("plugins/MyPlugin/config.yml", f.read())
 ```
-
-**Wipe a logs folder:**
+Or for a binary upload via the panel's upload service:
 ```python
-listing = s.list_files("/logs")
-files = [item["attributes"]["name"] for item in listing.get("data", [])]
-if files:
-    s.delete_files(files, root="/logs")
+server.upload_file("/tmp/world.zip", remote_dir="/")
+server.decompress_file("world.zip", root="/")
+server.delete_files(["world.zip"], root="/")
 ```
 
-## Caveats / known assumptions
+### List + filter files in a directory
+```python
+listing = server.list_files("/logs")
+log_files = [
+    item["attributes"]["name"]
+    for item in listing["data"]
+    if item["attributes"]["is_file"] and item["attributes"]["name"].endswith(".log")
+]
+```
 
-1. **No WebSocket console** — `send_command` is one-shot. Live log streaming requires the websocket endpoint (`/api/client/servers/{uuid}/websocket`), not yet wrapped.
-2. **Not covered yet:** schedules, allocations, dedicated-node management, subusers, SSH keys, 2FA, databases. The spec has them; just not wrapped.
+### Delete every file in a folder (server-side)
+```python
+listing = server.list_files("/logs")
+names = [i["attributes"]["name"] for i in listing["data"]]
+if names:
+    server.delete_files(names, root="/logs")
+```
 
-## Verified against the live API
+### Move / rename
+```python
+server.rename_files([("old.yml", "new.yml")], root="/configs")
+server.rename_files([("configs/old.yml", "backup/old.yml")], root="/")  # cross-dir = move
+```
 
-Smoke-tested end-to-end on `https://control.sparkedhost.us` — auth, `list_servers` (pagination), `server()`, `resources`, `list_files`, and the full `write_file` → `read_file` → `delete_files` round-trip all return as expected. Run `python smoke_test.py` after setting `SPARKEDHOST_API_KEY` (and optionally `SPARKEDHOST_TEST_WRITES=1`) to re-verify in your environment.
+### Create a backup and wait for it to finish
+```python
+import time
 
-## Where it lives
+resp = server.create_backup(name="pre-update")
+backup_uuid = resp["attributes"]["uuid"]
 
-- Repo: https://github.com/Jkratz01/sparkedhost
-- Single module: [sparkedhost/client.py](sparkedhost/client.py)
-- Examples: [example.py](example.py)
+while True:
+    page = server.list_backups()
+    me = next(b for b in page["data"] if b["attributes"]["uuid"] == backup_uuid)
+    if me["attributes"]["completed_at"]:
+        print("done, hash:", me["attributes"]["sha256_hash"])
+        break
+    time.sleep(5)
+```
+
+### Send a Minecraft `say` command (server must be running)
+```python
+state = server.resources()["attributes"]["current_state"]
+if state == "running":
+    server.send_command("say maintenance in 5 minutes")
+```
+
+### Get the connection address
+```python
+ip = server.attributes["relationships"]["allocations"]["data"][0]["attributes"]["ip_alias"]
+port = server.attributes["relationships"]["allocations"]["data"][0]["attributes"]["port"]
+print(f"connect to {ip}:{port}")
+```
+
+### Find a server by name
+```python
+def by_name(name):
+    for s in client.list_servers():
+        if s.name == name:
+            return s
+    raise LookupError(name)
+```
+
+### Catch all errors uniformly
+```python
+from sparkedhost import SparkedHostError
+try:
+    server.restart()
+except SparkedHostError as e:
+    log.exception("panel call failed: %s", e)
+```
+
+## 8. Invariants & gotchas
+
+- **Paths use `/`**, never `\`. Leading `/` is the server's home directory.
+- **`root` vs `path`**: file ops with a `root=` kwarg take **bare names** in `files`/`name`; ops with a `path=` argument take the **full** path. Mixing them silently writes to the wrong place.
+- **`write_file` overwrites** with no confirmation. To append, do `read_file` → concatenate → `write_file`.
+- **Power signals are lowercase** (`"start"`, not `"Start"`).
+- **`send_command` requires a running server** — calling it on an offline server returns 502; the lib raises `APIError(502, ...)`.
+- **`download_url` and `upload_url` are short-lived** (seconds). Use immediately; don't cache.
+- **`create_backup` is async.** The returned backup has `completed_at: null` and `bytes: 0`. Poll `list_backups()` until `completed_at` is set.
+- **`list_servers` is one HTTP call per page.** With many servers, cache the result instead of calling it in a loop.
+- **`Server` objects don't refresh.** `server.attributes` is a snapshot from when you fetched it. Re-call `client.server(uuid)` to refresh.
+- **Identifier vs UUID**: the panel's REST API takes the **UUID** in `/servers/{uuid}/...`. The 8-char `identifier` is just for display. This client uses UUIDs throughout.
+- **No retry / no rate-limit handling.** Single attempt per call. If the panel returns 429, `APIError(429, ...)` is raised and you should back off.
+
+## 9. Anti-patterns (don't do these)
+
+```python
+# DON'T: instantiate Server directly — it won't have a Client and breaks every call.
+from sparkedhost import Server
+s = Server(None, "uuid")  # BAD
+
+# DO:
+s = client.server("uuid")
+```
+
+```python
+# DON'T: paste the API key in source. Use env vars.
+client = Client(api_key="ptlc_realKeyHere")  # BAD
+
+# DO:
+client = Client()  # reads SPARKEDHOST_API_KEY
+```
+
+```python
+# DON'T: list_servers() in a hot loop.
+for _ in range(100):
+    for s in client.list_servers():  # BAD: 100 * (pages) HTTP calls
+        ...
+
+# DO: cache it.
+servers = client.list_servers()
+for _ in range(100):
+    for s in servers:
+        ...
+```
+
+```python
+# DON'T: use kill() as the default stop.
+server.kill()  # BAD: hard-kill, can corrupt world saves
+
+# DO:
+server.stop()      # graceful
+server.kill()      # only after stop() times out
+```
+
+## 10. Out of scope (not yet wrapped)
+
+These endpoints exist on the panel but are not in the client. PRs welcome; meanwhile drop to raw `Client._request(method, path, json=...)`.
+
+- WebSocket console + live log streaming (`/api/client/servers/{uuid}/websocket`)
+- Server schedules (cron)
+- Allocations management (network ports)
+- Subusers and per-user permissions
+- Database creation/management
+- 2FA enable/disable, SSH keys, API key CRUD on the account
+- Dedicated-node management (the entire `/api/client/dedicated/*` tree)
+- Workshop / Steam content management
+- The `/api/client/servers/{uuid}/setup/finish` flow (initial provisioning)
+
+## 11. Verification
+
+The repo ships [smoke_test.py](smoke_test.py). To verify the client works in your environment:
+
+```bash
+export SPARKEDHOST_API_KEY=...
+python smoke_test.py                              # read-only checks
+SPARKEDHOST_TEST_WRITES=1 python smoke_test.py    # adds a write/read/delete round-trip
+SPARKEDHOST_TEST_SERVER_UUID=<uuid> python smoke_test.py  # target a specific server
+```
+
+A passing run confirms auth, pagination, server lookup, resources, file listing, and (optionally) the file write convention against the live panel.
+
+## 12. Versioning
+
+`__version__` is exported from the package (`from sparkedhost import __version__`). The repo currently ships `0.1.0`. Bumping conventions are not enforced — when in doubt, semver.
