@@ -11,14 +11,17 @@ Repo: https://github.com/Jkratz01/sparkedhost · Source: [sparkedhost/client.py]
 ## 1. Install
 
 ```bash
-# from a project venv
-pip install git+https://github.com/Jkratz01/sparkedhost.git
+# normal install from PyPI (recommended)
+pip install sparkedhost
 
-# pin to a release once tagged
-pip install git+https://github.com/Jkratz01/sparkedhost.git@v0.1.0
+# pin a specific version
+pip install sparkedhost==0.1.0
+
+# install latest unreleased changes straight from GitHub main
+pip install git+https://github.com/Jkratz01/sparkedhost.git
 ```
 
-Runtime dep: `requests>=2.25`. Python 3.8+.
+PyPI: https://pypi.org/project/sparkedhost/. Runtime dep: `requests>=2.25`. Python 3.8+.
 
 ## 2. Environment
 

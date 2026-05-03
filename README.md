@@ -7,6 +7,12 @@ List your servers, hit power buttons, read & write files, manage backups — all
 ## Install
 
 ```bash
+pip install sparkedhost
+```
+
+Or pull the latest from `main` directly:
+
+```bash
 pip install git+https://github.com/Jkratz01/sparkedhost.git
 ```
 
